@@ -1,0 +1,51 @@
+---
+title: 'DATA 622: Homework 1'
+author: "Andrew Bowen"
+date: "2024-02-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r library, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(arrow)
+library(recipes)
+library(modelr)
+```
+
+
+## NFL Spread Data
+
+I pulled a [dataset from Kaggle here](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data) containing scores and betting spread data for NFL games dating back to 1967. There's ~15k rows here in this dataset. 
+
+```{r}
+df <- read.csv("data/game_results.csv")
+
+df$team_away <- as.factor(df$team_away)
+df$team_home <- as.factor(df$team_home)
+
+df$schedule_date <- as.Date(df$schedule_date,  tryFormats = c("%m/%d/%Y"))
+```
+
+
+
+
+## ELO Ratings
+There's also an [ELO dataset for NFL teams dating back to 1920 as well](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings). Elo is a [rating system](https://en.wikipedia.org/wiki/Elo_rating_system), originally used to produce the relative ratings of chess players, which can be repurposed for other competitions
+```{r elo-read-in, message=FALSE}
+elo <- read_csv("data/nfl_elo.csv")
+head(elo)
+```
+
+We can filter out any matchups prior to the 1966 season, where our spread data begins
+```{r}
+starting_season <- min(df$schedule_season)
+
+elo <- elo %>% filter(season > starting_season)
+head(df)
+```
+
