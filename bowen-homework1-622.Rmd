@@ -18,40 +18,23 @@ library(modelr)
 library(tidymodels)
 library(tidyr)
 library(Metrics)
+library(corrplot)
+library(GGally)
 ```
 
 
 ## Introduction
-Sport gambling has become a lucrative industry in the United States since the [Supreme Cuurt's 2018 ruling legalizing it](https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&cad=rja&uact=8&ved=2ahUKEwj8jrqz3cSEAxXSl4kEHVN4AMAQFnoECBMQAQ&url=https%3A%2F%2Fwww.nytimes.com%2F2018%2F05%2F14%2Fus%2Fpolitics%2Fsupreme-court-sports-betting-new-jersey.html&usg=AOvVaw3cvmDygwvW_QJ2Phs4HknQ&opi=89978449). While not a gambler myself, I am an avid sports fan. I was able to pull two datasets (one small and one large) rleated to both the National Football League Game results int he Super Bowl Era (since 1967) and NBA individual box scores since 1997.
+Sport gambling has become a lucrative industry in the United States since the [Supreme Cuurt's 2018 ruling legalizing it](https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&cad=rja&uact=8&ved=2ahUKEwj8jrqz3cSEAxXSl4kEHVN4AMAQFnoECBMQAQ&url=https%3A%2F%2Fwww.nytimes.com%2F2018%2F05%2F14%2Fus%2Fpolitics%2Fsupreme-court-sports-betting-new-jersey.html&usg=AOvVaw3cvmDygwvW_QJ2Phs4HknQ&opi=89978449). While not a gambler myself, I am an avid sports fan. I was able to pull two datasets (one small and one large) rleated to both the National Football League Game results in the Super Bowl Era (since 1967) and NBA individual box scores since 1997.
 
 - [NFL Game Spread Data](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data) (~20k rows)
 - [NBA Player Boxscores](https://www.kaggle.com/datasets/szymonjwiak/nba-traditional?select=traditional.csv) (~700k rows)
+- [NFL ELO Rating Data](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings)
 
-## NFL Spread Data
-
-I pulled a [dataset from Kaggle here](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data) containing scores and betting spread data for NFL games dating back to 1967. There's ~15k rows here in this dataset. 
-
-```{r}
-nfl_games <- read.csv("data/game_results.csv")
-
-nfl_games$team_away <- as.factor(nfl_games$team_away)
-nfl_games$team_home <- as.factor(nfl_games$team_home)
-
-nfl_games$date <- as.Date(nfl_games$schedule_date,  tryFormats = c("%m/%d/%Y"))
-```
-
-We can lookup the team IDs from the provided `nfl_teams.csv` file provided by the Kaggle dataset
-```{r warning=FALSE, message=FALSE}
-teams <- read_csv("data/nfl_teams.csv")
-
-home_teams <- teams %>% rename(home_team_id = team_id) %>% select(team_name, home_team_id) 
-away_teams <- teams %>% rename(away_team_id = team_id) %>% select(team_name, away_team_id) 
-
-head(nfl_games)
-```
 
 ## ELO Ratings
-There's also an [ELO dataset for NFL teams dating back to 1920 as well](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings). ELO is a [rating system](https://en.wikipedia.org/wiki/Elo_rating_system), originally used to produce the relative ratings of chess players, which can be re-purposed for other competitions. You can read more about [FiveThirtyEight's ELO Rating system here](https://fivethirtyeight.com/methodology/how-our-nfl-predictions-work/). In our case, we'll be looking to see whether ELO ratings are helpful predictors for NFL spread data.
+I pulled an [ELO dataset for NFL teams dating back to 1920 as well](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings). ELO is a [rating system](https://en.wikipedia.org/wiki/Elo_rating_system), originally used to produce the relative ratings of chess players, which can be re-purposed for other competitions. You can read more about [FiveThirtyEight's ELO Rating system here](https://fivethirtyeight.com/methodology/how-our-nfl-predictions-work/). In our case, we'll be looking to see whether ELO ratings are helpful predictors for NFL spread data.
+
+There's ~13k rows here in this dataset. In terms of building a predictive model, there's multiple ways one could approach this dataset. For instance, one could try to build a classification model that selects which of the participant teams ois likely to win outright or cover the predicted point spread (i.e., the proposed difference in point totals which bookmakers collect wagers on). In this case, I'd like to build a model to help predict the spread of a game itself, which is more of a regression task. For simplicity, a simple linear regression model could be used.
 ```{r elo-read-in, message=FALSE}
 elo <- read_csv("data/nfl_elo.csv")
 head(elo)
@@ -59,54 +42,50 @@ head(elo)
 
 We can filter out any matchups prior to the 1966 season, where our spread data begins
 ```{r filter-elo}
-starting_season <- min(nfl_games$schedule_season)
+# Clean up some names/IDs
+elo <- elo %>% filter(season > 1967) %>% 
+  mutate(team1 = ifelse(team1=="WSH", "WAS", team1),
+         team2 = ifelse(team2=="WSH", "WAS", team2))
 
-elo <- elo %>% filter(season > starting_season)
-
-home_teams <- teams %>% rename(home_team_name=team_name) %>% select(home_team_name, team_id) 
-away_teams <- teams %>% rename(away_team_name=team_name) %>% select(away_team_name, team_id) 
-
-# Lookup team names based on ID
-home_join = join_by(team1 == team_id)
-away_join = join_by(team2 == team_id)
-elo <- left_join(elo, home_teams, by=home_join) %>% 
-  left_join(away_teams, by=away_join)
+# Calculate acutal point spread of game result
+elo$actual_spread <- elo$score1 - elo$score2
 
 head(elo)
 ```
 
 
-Now we can join together our spread and ELO datasets. We'll need to create a unique identifier for each game (`game_id`), based on the date as well as the teams involved. This should produce a UUID for our dataset
-```{r game-ids}
-# Create Game ID for joining
-nfl_games <- nfl_games %>% mutate(game_id = paste(as.character(date),  team_home, team_away))
-elo <- elo %>% mutate(game_id = paste(as.character(date), home_team_name, away_team_name))
 
-# Lookup ELO ratins per game
-df <- left_join(nfl_games, elo, by="game_id")
+We can use the `ggpairs` function to plot the relationship between the variables we care about and our predictor
+```{r corner-plot-elo, warning=FALSE, message=FALSE}
+elo <- elo %>% mutate(log_elo1_pre = log(elo1_pre), 
+                      elo_diff = elo1_pre - elo2_pre,
+                      elo_ratio = elo1_pre / elo2_pre,
+                      qb_diff = qbelo1_pre - qbelo2_pre,
+                      qb_ratio = qbelo1_pre / qbelo2_pre)
+elo_ratings <- elo %>% select(actual_spread, elo1_pre, elo2_pre, qbelo1_pre, qbelo2_pre, elo_diff, elo_ratio, qb_diff, qb_ratio)
+ggpairs(elo_ratings, upper=NULL)
+```
+We see relatively normal distributions of our predictor variables and our outcome (`actual_spread`). However, this plot is a bit busy due to the density of Elo ratings. One easy way for us to visualize the relationships between features and outcome variables is a correlation plot. The `corrplot` package in R is handy for this.
 
-head(df)
+```{r elo-corr-plot}
+# Make correlation plot
+cor <- cor(elo_ratings)
+
+corrplot(cor)
 ```
 
 
-### Visualizing our NFL Data
+### Modeling
 
-```{r homw-elo-vs-score, warning=FALSE}
-ggplot(df, aes(x=elo1_pre, y=score_home)) +
-  geom_point() +
-  labs(x="Home Team ELO Before Game",
-       y="Home Team Score",
-       title="NFL Home Team Scores vs prior ELO Ratings")
+We can build a simple linear regression model to predict the game's spread based on the team and quarterback Elo ratings ratios prior to the game.
+```{r nfl-regression-model}
+# Set up linear model
+nfl_model <- lm(actual_spread ~ elo_diff + qb_diff, elo)
+
+summary(nfl_model)
 ```
 
-```{r away-elo-vs-score, warning=FALSE}
-ggplot(df, aes(x=elo2_pre, y=score_away)) + 
-  geom_point() + 
-  labs(x="Away Team ELO Before Game",
-       y="Away Team Score",
-       title="NFL Away Team Scores vs prior ELO Ratings")
-```
-
+We see an $R^2_{adj}$ value of 0.1569, which isn't great in terms of prediction. We only have ~13k instances of NFL contests, which wouldn't qualify as big data, but could be neough to produce a regression. In this case, however, it looks liek Elo ratingsmay not be the strongest predictors of the outcome of an NFL game.
 
 
 ## NBA Boxscores
@@ -225,7 +204,7 @@ ggplot(combo, aes(APG, fill = label)) + geom_density(alpha = 0.2)
 
 We're seeing pretty good alignment in the distributions of our features between our training and test data, which is a good sign that our decision tree will be both trained and evaluated on data reflecting the population. I found this datacamp
 
-```{r}
+```{r fit-decision-tree}
 tree_spec <- decision_tree() %>%
  set_engine("rpart") %>%
  set_mode("regression")
