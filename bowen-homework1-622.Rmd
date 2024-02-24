@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r library, warning=FALSE, message=FALSE}
+```{r library, echo=FALSE, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(arrow)
 library(recipes)
@@ -18,34 +18,97 @@ library(modelr)
 ```
 
 
-## NFL Spread Data
+## Introduction
+
+
+
+## Data Wrangling
+
+### NFL Spread Data
 
 I pulled a [dataset from Kaggle here](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data) containing scores and betting spread data for NFL games dating back to 1967. There's ~15k rows here in this dataset. 
 
 ```{r}
-df <- read.csv("data/game_results.csv")
+nfl_games <- read.csv("data/game_results.csv")
 
-df$team_away <- as.factor(df$team_away)
-df$team_home <- as.factor(df$team_home)
+nfl_games$team_away <- as.factor(nfl_games$team_away)
+nfl_games$team_home <- as.factor(nfl_games$team_home)
 
-df$schedule_date <- as.Date(df$schedule_date,  tryFormats = c("%m/%d/%Y"))
+nfl_games$date <- as.Date(nfl_games$schedule_date,  tryFormats = c("%m/%d/%Y"))
 ```
 
+We can lookup the team IDs from the provided `nfl_teams.csv` file provided by the Kaggle dataset
+```{r warning=FALSE, message=FALSE}
+teams <- read_csv("data/nfl_teams.csv")
 
+home_teams <- teams %>% rename(home_team_id = team_id) %>% select(team_name, home_team_id) 
+away_teams <- teams %>% rename(away_team_id = team_id) %>% select(team_name, away_team_id) 
 
+head(nfl_games)
+```
 
 ## ELO Ratings
-There's also an [ELO dataset for NFL teams dating back to 1920 as well](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings). Elo is a [rating system](https://en.wikipedia.org/wiki/Elo_rating_system), originally used to produce the relative ratings of chess players, which can be repurposed for other competitions
+There's also an [ELO dataset for NFL teams dating back to 1920 as well](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings). ELO is a [rating system](https://en.wikipedia.org/wiki/Elo_rating_system), originally used to produce the relative ratings of chess players, which can be re-purposed for other competitions. You can read more about [FiveThirtyEight's ELO Rating system here](https://fivethirtyeight.com/methodology/how-our-nfl-predictions-work/). In our case, we'll be looking to see whether ELO ratings are helpful predictors for NFL spread data.
 ```{r elo-read-in, message=FALSE}
 elo <- read_csv("data/nfl_elo.csv")
 head(elo)
 ```
 
 We can filter out any matchups prior to the 1966 season, where our spread data begins
-```{r}
-starting_season <- min(df$schedule_season)
+```{r filter-elo}
+starting_season <- min(nfl_games$schedule_season)
 
 elo <- elo %>% filter(season > starting_season)
+
+home_teams <- teams %>% rename(home_team_name=team_name) %>% select(home_team_name, team_id) 
+away_teams <- teams %>% rename(away_team_name=team_name) %>% select(away_team_name, team_id) 
+
+# Lookup team names based on ID
+home_join = join_by(team1 == team_id)
+away_join = join_by(team2 == team_id)
+elo <- left_join(elo, home_teams, by=home_join) %>% 
+  left_join(away_teams, by=away_join)
+
+head(elo)
+```
+
+
+Now we can join together our spread and ELO datasets. We'll need to create a unique identifier for each game (`game_id`), based on the date as well as the teams involved. This should produce a UUID for our dataset
+```{r game-ids}
+# Create Game ID for joining
+nfl_games <- nfl_games %>% mutate(game_id = paste(as.character(date),  team_home, team_away))
+elo <- elo %>% mutate(game_id = paste(as.character(date), home_team_name, away_team_name))
+
+# Lookup ELO ratins per game
+df <- left_join(nfl_games, elo, by="game_id")
+
 head(df)
+```
+
+
+### Visualizing our NFL Data
+
+```{r homw-elo-vs-score, warning=FALSE}
+ggplot(df, aes(x=elo1_pre, y=score_home)) +
+  geom_point() +
+  labs(x="Home Team ELO Before Game",
+       y="Home Team Score",
+       title="NFL Home Team Scores vs prior ELO Ratings")
+```
+
+```{r away-elo-vs-score, warning=FALSE}
+ggplot(df, aes(x=elo2_pre, y=score_away)) + 
+  geom_point() + 
+  labs(x="Away Team ELO Before Game",
+       y="Away Team Score",
+       title="NFL Away Team Scores vs prior ELO Ratings")
+```
+
+
+
+## NBA Boxscores
+I also found this other [Kaggle dataset with NBA Boxscores](https://www.kaggle.com/datasets/szymonjwiak/nba-traditional) which would be considered more "big data" (~700k rows).
+```{r}
+
 ```
 
