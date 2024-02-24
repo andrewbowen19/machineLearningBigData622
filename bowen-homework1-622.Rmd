@@ -15,16 +15,19 @@ library(tidyverse)
 library(arrow)
 library(recipes)
 library(modelr)
+library(tidymodels)
+library(tidyr)
+library(Metrics)
 ```
 
 
 ## Introduction
+Sport gambling has become a lucrative industry in the United States since the [Supreme Cuurt's 2018 ruling legalizing it](https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&cad=rja&uact=8&ved=2ahUKEwj8jrqz3cSEAxXSl4kEHVN4AMAQFnoECBMQAQ&url=https%3A%2F%2Fwww.nytimes.com%2F2018%2F05%2F14%2Fus%2Fpolitics%2Fsupreme-court-sports-betting-new-jersey.html&usg=AOvVaw3cvmDygwvW_QJ2Phs4HknQ&opi=89978449). While not a gambler myself, I am an avid sports fan. I was able to pull two datasets (one small and one large) rleated to both the National Football League Game results int he Super Bowl Era (since 1967) and NBA individual box scores since 1997.
 
+- [NFL Game Spread Data](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data) (~20k rows)
+- [NBA Player Boxscores](https://www.kaggle.com/datasets/szymonjwiak/nba-traditional?select=traditional.csv) (~700k rows)
 
-
-## Data Wrangling
-
-### NFL Spread Data
+## NFL Spread Data
 
 I pulled a [dataset from Kaggle here](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data) containing scores and betting spread data for NFL games dating back to 1967. There's ~15k rows here in this dataset. 
 
@@ -107,8 +110,144 @@ ggplot(df, aes(x=elo2_pre, y=score_away)) +
 
 
 ## NBA Boxscores
-I also found this other [Kaggle dataset with NBA Boxscores](https://www.kaggle.com/datasets/szymonjwiak/nba-traditional) which would be considered more "big data" (~700k rows).
-```{r}
+I also found this other [Kaggle dataset with NBA Boxscores](https://www.kaggle.com/datasets/szymonjwiak/nba-traditional) which would be considered more "big data" (~700k rows). Each row in this dataset consists of an individual NBA player's statistics (points, rebounds assists, and other counting stats) in a single game from the 1996 season through the 2023 season.
 
+A typical NBA game will see anywhere from 15-20 unique players, and with a single team 82 games in a regular reasons between 30 teams in the NBA, there can quickly be many instances of individual player performance. While not traditionally "big data", this dataset is considerably larger than our NFL dataset above.
+
+In our case, we'll be interested in predicting the total number of points scored by a given player in a single game. We'll train a simple regression decision tree, as it's a robust and explainable model. We'll want to be sure to avoid overfitting, as decision trees can often be highly sensitive to changes in training data
+```{r}
+nba <- read_csv("data/traditional.csv")
+head(nba)
 ```
 
+```{r}
+# Convert player and teams to a factor
+nba$player <- as.factor(nba$player)
+nba$team <- as.factor(nba$team)
+nba$home <- as.factor(nba$home)
+nba$away <- as.factor(nba$away)
+```
+
+In the case of this dataset, we'd be interested in predicting the `points` a player will score in a given game. Betting markets also exist that set lines on individual players' rebounds, assists, or combinations of points, rebounds, and assists. For our purposes, we'll stick to attempting to predict the total amount of points a player will score in a given game
+
+Before we build any sort of predictvie model, however, an exploratory data analysis (EDA) will be a helpful exercise. Firstly, we can plot the distribution of points scored in games by individual NBA players
+```{r nba-points-dist, warning=FALSE, message=FALSE}
+ggplot(nba, aes(x=PTS)) + 
+  geom_histogram() + 
+  labs(x="Points", title="NBA Player Point Totals: 1996 - 2023")
+```
+We see a right-skewed distribution, which makes sense as most players in the game will not be scoring abnormally high point totals. There are a few outlier points as well, such as [Kobe Bryant's 81-point game against the Toronto Raptors](https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&cad=rja&uact=8&ved=2ahUKEwip_oP2z8SEAxWSkIkEHfgmC8AQFnoECAYQAQ&url=https%3A%2F%2Fwww.espn.com%2Fnba%2Fgame%2F_%2FgameId%2F260122013&usg=AOvVaw3pIhn1NNDBkM4DlB8ckEGe&opi=89978449) as well.
+
+### Computing Rolling Averages
+Int his dataset, it's not feasible for us to necessarily predict a player's point total based on his rebounds and assists from the *same game*, since that wouldn't necessarily help us in predicting *before* the game. However, from this dataset we can compute rolling averages per player in a given season of his average points, rebounds, and assists per game. This could give us some historical context on a player's performance going into a given game.
+```{r}
+# Calculate rolling averages of a player's points, rebounds, and assists per game
+nba_per_game <- nba %>% 
+  group_by(player, season) %>% 
+  arrange(date, .by_group = TRUE) %>%
+  mutate(
+    game_number = row_number(),
+    rolling_pt_total = cumsum(PTS),
+    rolling_reb = cumsum(REB),
+    rolling_ast = cumsum(AST)
+    ) %>%
+  mutate(PPG = rolling_pt_total / game_number,
+         RPG = rolling_reb / game_number,
+         APG = rolling_ast / game_number,
+         )
+```
+
+As a check, let's plot Michael Jordan's points-per-game average for the 1997 season, in [which he finished the season averaging 29.6 points-per-game](https://www.basketball-reference.com/players/j/jordami01.html) (no small feat!). We see more variability at the start of the season, with the curve approching his season average towards the end, which makes sense as the rolling average will be subject to fewer larger fluctuations as the sample size grows.
+```{r}
+jordan97 <- nba_per_game %>% filter(player=="Michael Jordan", season==1997)
+ggplot(jordan97, aes(x=date, y=PPG)) + geom_line()
+```
+
+
+### Three-point attempts
+One point of interest will be *how* the game of basketball has been played differently over time. One phenomenon that has changed the in-game strategy has been the [proliferation of the three-point shot](https://shottracker.com/articles/the-3-point-revolution), which has been recognized as a more efficient shot than a 2-pointers from a comparable distance (a.k.a. a *Mid-range*). The chart below depicts the total number of three-pointers attempted per game in the NBA since the 1996 season. It's clear to see that the number of 3-pointers attempted has risen steadily since around 2013, when the phenomenon began gaining traction.
+
+From a modeling perspective, this is a interesting phenomenon because it impacts the predictions of the kind of player. Those who are strong outside shooters would likely have more opportunities to shoot (and score) in later years, as their skill was recognized.
+```{r threes-per-game, warning=FALSE, message=FALSE}
+# Plot avg number of 3PA per game
+threes_per_game <- nba %>% 
+  group_by(season, gameid) %>%
+  summarise(total_threes_attempted = sum(`3PA`))
+
+avg_threes_per_game <- threes_per_game %>% 
+  group_by(season) %>% 
+  summarise(avg_threes_per_game = mean(total_threes_attempted))
+
+ggplot(avg_threes_per_game, aes(x=season, y=avg_threes_per_game)) + 
+    geom_line() + labs(x="NBA Season", y="Average 3PA per Game", title="Average Number of 3-pt Attempts Per Game: NBA 1996 - 2023")
+```
+
+Luckily, we have many more instances than dimensions in this dataset, so we will have to worry less about dimensionality. I'm looking to train a decision tree to produce a regression of `points` scored in a game by a player. First, we can set up a [training and testing set](https://www.statology.org/train-test-split-r/) for model evaluation.
+
+```{r}
+#make this example reproducible
+set.seed(23)
+
+#create ID column
+nba_per_game$id <- 1:nrow(nba_per_game)
+
+#use 70% of dataset as training set and 30% as test set 
+train <- nba_per_game %>% dplyr::sample_frac(0.80)
+test  <- dplyr::anti_join(nba_per_game, train, by = 'id')
+```
+
+As a sanity check, let's ensure the distribution of points in each of these datasets resemble each other
+```{r}
+train$label <- "Train"
+test$label <- "Test"
+combo <- rbind(train, test)
+
+# Plot distributions of PTS
+ggplot(combo, aes(PTS, fill = label)) + geom_density(alpha = 0.2)
+```
+
+That looks like a pretty close match between these distributions. Let's check some of our other variables that we'd use as features (`PPG`, `RPG`, `APG`)
+```{r ppg-train-test-split}
+# Points-per-game
+ggplot(combo, aes(PPG, fill = label)) + geom_density(alpha = 0.2)
+```
+
+```{r rpg-train-test-split}
+#Rebounds-per-game
+ggplot(combo, aes(RPG, fill = label)) + geom_density(alpha = 0.2)
+```
+```{r apg-train-test-split}
+# Asssists-per-game
+ggplot(combo, aes(APG, fill = label)) + geom_density(alpha = 0.2)
+```
+
+### Modeling
+
+We're seeing pretty good alignment in the distributions of our features between our training and test data, which is a good sign that our decision tree will be both trained and evaluated on data reflecting the population. I found this datacamp
+
+```{r}
+tree_spec <- decision_tree() %>%
+ set_engine("rpart") %>%
+ set_mode("regression")
+
+# Fit the model to the data
+tree_fit <- tree_spec %>%
+ fit(PTS ~ PPG + RPG + APG + player + team + home + away, data = train)
+```
+
+
+```{r nba-model-evaluation}
+# Make predictions on the testing data
+# Make predictions on the testing data
+predictions <- tree_fit %>%
+ predict(test) %>%
+ pull(.pred)
+
+# Calculate RMSE and R-squared
+results <- data.frame(truth=test$PTS, estimate=predictions)
+
+rmse(test$PTS, predictions)
+results %>% rsq(truth, estimate)
+```
+
+We see a value of  $R^2 = 0.533$. Some tuning of our decision tree model (different leaf node sizes/engine) could see us improve the predictive capability of this model.
