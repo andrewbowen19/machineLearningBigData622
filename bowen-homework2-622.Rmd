@@ -1,0 +1,82 @@
+---
+title: 'DATA 622: Homework 2'
+author: "Andrew Bowen"
+date: "2024-03-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+library(tidyverse)
+library(caret)
+library(tidymodels)
+```
+
+
+We'll be using the NFL ELO rating dataset we used in homework 1. [This dataset](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings) comes from Kaggle, and contains the [ELO ratings](https://en.wikipedia.org/wiki/Elo_rating_system) of NFL teams both before and after their matchups, as well as the points scored by each team in the game. 
+```{r warning=FALSE, message=FALSE}
+elo <- read_csv("data/nfl_elo.csv")
+
+# Some basic handling of team renames, as well as a boolean winner column
+elo <- elo %>% 
+  mutate(team1 = ifelse(team1=="WSH", "WAS", team1),
+         team2 = ifelse(team2=="WSH", "WAS", team2),
+         team1wins = ifelse(score1 > score2, 1, 0))
+```
+
+## Exploratory Data Analysis
+
+First, let's take a quick look at the distribution of pre-game ELO ratings of each team (home & away):
+```{r}
+prelo1 <- elo %>% 
+  rename(elo = elo1_pre, team=team1) %>%
+  select(c("team", "elo")) %>%
+  mutate(team_type = "Home Team") 
+prelo2 <- elo %>%
+  rename(elo = elo2_pre, team=team2) %>%
+  select(c("team", "elo")) %>%
+  mutate(team_type = "Away Team")
+prelo <- rbind(prelo1, prelo2)
+
+# Plot pre-game ELO ratings for home and away teams
+ggplot(prelo, aes(elo, fill = team_type)) +
+  geom_density(alpha = 0.2) +
+  labs(x="ELO Rating (pre-game)", title="Pre-Matchup ELO Ratings of NFL Teams (post-1967)")
+```
+
+Both our distributions of pre-game ELO ratings for home and away teams look relatively normally distributed. This is helpful to know as **our classification task will be to try to predict whether the home team or away team will win a given NFL game, based on the respective ELO ratings prior to the game, along with other features included in the Kaggle dataset**
+
+### Train-Test Split
+Before we model our data using a decision tree, we'll need to create a train-test split for later validation. We'll hold out 20% of our dataset for testing.
+```{r}
+#make this example reproducible
+set.seed(1234)
+
+#create ID column
+elo$game_id <- 1:nrow(elo)
+
+#use 70% of dataset as training set and 30% as test set 
+train <- elo %>% dplyr::sample_frac(0.80)
+test  <- dplyr::anti_join(elo, train, by = 'game_id')
+```
+
+
+
+
+
+## Building Models
+
+
+
+
+## Evalutaion
+
+
+
+
+
+

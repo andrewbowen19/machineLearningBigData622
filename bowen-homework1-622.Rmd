@@ -85,7 +85,7 @@ nfl_model <- lm(actual_spread ~ elo_diff + qb_diff, elo)
 summary(nfl_model)
 ```
 
-We see an $R^2_{adj}$ value of 0.1569, which isn't great in terms of prediction. We only have ~13k instances of NFL contests, which wouldn't qualify as big data, but could be neough to produce a regression. In this case, however, it looks liek Elo ratingsmay not be the strongest predictors of the outcome of an NFL game.
+We see an $R^2_{adj}$ value for this model of 0.1569, which isn't great in terms of prediction. We only have ~13k instances of NFL contests, which wouldn't qualify as big data, but could be neough to produce a regression. In this case, however, it looks liek Elo ratingsmay not be the strongest predictors of the outcome of an NFL game.
 
 
 ## NBA Boxscores
@@ -118,7 +118,7 @@ ggplot(nba, aes(x=PTS)) +
 We see a right-skewed distribution, which makes sense as most players in the game will not be scoring abnormally high point totals. There are a few outlier points as well, such as [Kobe Bryant's 81-point game against the Toronto Raptors](https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&cad=rja&uact=8&ved=2ahUKEwip_oP2z8SEAxWSkIkEHfgmC8AQFnoECAYQAQ&url=https%3A%2F%2Fwww.espn.com%2Fnba%2Fgame%2F_%2FgameId%2F260122013&usg=AOvVaw3pIhn1NNDBkM4DlB8ckEGe&opi=89978449) as well.
 
 ### Computing Rolling Averages
-Int his dataset, it's not feasible for us to necessarily predict a player's point total based on his rebounds and assists from the *same game*, since that wouldn't necessarily help us in predicting *before* the game. However, from this dataset we can compute rolling averages per player in a given season of his average points, rebounds, and assists per game. This could give us some historical context on a player's performance going into a given game.
+Invthis dataset, it's not feasible for us to necessarily predict a player's point total based on his rebounds and assists from the *same game*, since that wouldn't necessarily help us in predicting *before* the game. However, from this dataset we can compute rolling averages per player in a given season of his average points, rebounds, and assists per game. This could give us some historical context on a player's performance going into a given game.
 ```{r}
 # Calculate rolling averages of a player's points, rebounds, and assists per game
 nba_per_game <- nba %>% 
@@ -175,7 +175,7 @@ train <- nba_per_game %>% dplyr::sample_frac(0.80)
 test  <- dplyr::anti_join(nba_per_game, train, by = 'id')
 ```
 
-As a sanity check, let's ensure the distribution of points in each of these datasets resemble each other
+As a sanity check, let's ensure the distribution of points in each of these datasets (test vs train) resemble each other. We're doing this in part to make sure that our training set is representative of the population we're interesting in predicting on (in this case, the performance of individual players in an NBA game). This is a step we can take to ensure that our model isn't fitting to distribution values within the training dataset that may not be reflected in the testing set.
 ```{r}
 train$label <- "Train"
 test$label <- "Test"
@@ -185,24 +185,29 @@ combo <- rbind(train, test)
 ggplot(combo, aes(PTS, fill = label)) + geom_density(alpha = 0.2)
 ```
 
-That looks like a pretty close match between these distributions. Let's check some of our other variables that we'd use as features (`PPG`, `RPG`, `APG`)
+That looks like a pretty close match between these distributions. Let's check some of our other variables that we'd use as features (`PPG`, `RPG`, `APG`) for our model. 
 ```{r ppg-train-test-split}
 # Points-per-game
 ggplot(combo, aes(PPG, fill = label)) + geom_density(alpha = 0.2)
 ```
 
+## Rebounds per Game (RPG)
+
 ```{r rpg-train-test-split}
-#Rebounds-per-game
+# Rebounds-per-game
 ggplot(combo, aes(RPG, fill = label)) + geom_density(alpha = 0.2)
 ```
+
+## Assists per Game (APG)
+
 ```{r apg-train-test-split}
-# Asssists-per-game
+# Assists-per-game
 ggplot(combo, aes(APG, fill = label)) + geom_density(alpha = 0.2)
 ```
 
 ### Modeling
 
-We're seeing pretty good alignment in the distributions of our features between our training and test data, which is a good sign that our decision tree will be both trained and evaluated on data reflecting the population. I found this datacamp
+We're seeing pretty good alignment in the distributions of our features between our training and test data, which is a good sign that our decision tree will be both trained and evaluated on data reflecting the entire population of NBA games. I found [this datacamp tutorial](https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&cad=rja&uact=8&ved=2ahUKEwibmbq9rtiEAxVPlIkEHXNJBLgQFnoECAYQAQ&url=https%3A%2F%2Fwww.datacamp.com%2Ftutorial%2Fdecision-trees-R&usg=AOvVaw3kYWNBfmLmFt3q-JQv690N&opi=89978449) on decision trees in R to be a helpful resource in building a decision tree for this dataset.
 
 ```{r fit-decision-tree}
 tree_spec <- decision_tree() %>%
@@ -229,4 +234,4 @@ rmse(test$PTS, predictions)
 results %>% rsq(truth, estimate)
 ```
 
-We see a value of  $R^2 = 0.533$. Some tuning of our decision tree model (different leaf node sizes/engine) could see us improve the predictive capability of this model.
+We see a value of  $R^2 = 0.533$. Some tuning of our decision tree model (different leaf node sizes/engine) could see us improve the predictive capability of this model. However, we'll want to be careful to avoid over-fitting, as decision trees are a class of models that are prone to not generalizing well, especially if the depth of the tree becomes too great in relation to the training data.
