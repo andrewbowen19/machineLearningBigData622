@@ -128,6 +128,7 @@ conf_mat(test, winner, prediction)
 ```
 
 ```{r}
+# Train decision
 tree <- caret::train(naive_model_formula, 
                      data=training, 
                      method="rpart", 
@@ -136,24 +137,27 @@ tree <- caret::train(naive_model_formula,
 
 
 ```{r}
-confusionMatrix(tree)
-```
-
-```{r}
-simple_formula <- winner ~ elo1_pre + elo2_pre # + qbelo1_pre + qbelo2_pre + elo_prob1 + elo_prob2
+simple_formula <- winner ~ elo1_pre + elo2_pre +  qbelo1_pre + qbelo2_pre#  + elo_prob1 + elo_prob2
 
 tree_simple <- caret::train(simple_formula, 
                      data=training, 
                      method="rpart", 
                      trControl = trainControl(method = "cv", number=10))
 
-confusionMatrix(tree_simple)
 ```
 
 ## Evalutaion
 
 One advantage of decision trees from the [pre-work article](https://decizone.com/blog/the-good-the-bad-the-ugly-of-using-decision-trees) is the idea of explainability. That is, decision trees are an explainable model because they often mirror the if-else logic of human decision making, even if conditional probabilities are used. Conversely, random forest methods will tend to improve the performance of a model, as they combine the "wisdom" of several weak learners (decision trees). However, these random forest models often **lose out** on explainability, since they are an amalgamation of several models together, each with a different structure.
 
+One simple way to evaluate our decision trees is via a confusion matrix, which shows the relative counts of true and false positives and negatives. In our case, an `Away` team winning would be considered a member of the "positive" class, while a `Home` team victory would be a negative class instance. it shoudl be noted there's nothing inherently "positive" or "negative" about these outcomes, they are simply an artifact of the classification task at hand.
+```{r}
+confusionMatrisx(tree)
+```
 
+
+```{r simple-tree-conf-matrix}
+confusionMatrix(tree_simple)
+```
 
 
