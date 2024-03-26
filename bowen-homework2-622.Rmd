@@ -14,12 +14,14 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(caret)
 library(tidymodels)
+library(GGally)
+library(corrplot)
 ```
 
 
 **For this assignment, our classification task will be to try to predict whether the home team or away team will win a given NFL game, based on the respective ELO ratings prior to the game, along with other features included in the Kaggle dataset.**
 
-We'll be using the NFL ELO rating dataset we used in homework 1. [This dataset](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings) comes from Kaggle, and contains the [ELO ratings](https://en.wikipedia.org/wiki/Elo_rating_system) of NFL teams both before and after their matchups, as well as the points scored by each team in the game. 
+We'll be using the NFL ELO rating dataset we used in homework 1. [This dataset](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings) comes from Kaggle, and contains the [ELO ratings](https://en.wikipedia.org/wiki/Elo_rating_system) of NFL teams both before and after their matchups, as well as the points scored by each team in the game. More information on the FiveThirtyEight method which calculates these ELO ratings can be [found here](https://fivethirtyeight.com/methodology/how-our-nfl-predictions-work/).
 ```{r warning=FALSE, message=FALSE}
 elo <- read_csv("data/nfl_elo.csv")
 
@@ -54,8 +56,34 @@ ggplot(prelo, aes(elo, fill = team_type)) +
 
 Both our distributions of pre-game ELO ratings for home and away teams look relatively normally distributed. This is helpful to know before we go into modeling, as some modeling algorithms expect normally distributed (and sometimes scaled & centered) data.
 
-### Train-Test Split
-Before we model our data using a decision tree, we'll need to create a train-test split for later validation. We'll hold out 20% of our dataset for testing.
+Let's also take a look at the pair plot of our joint distribuions
+
+```{r warning=FALSE, message=FALSE}
+
+elo %>% select(winner, elo1_pre, elo2_pre, elo_prob1, elo_prob2, qbelo1_pre, qbelo2_pre) %>%
+  ggpairs()
+```
+```{r}
+elo %>% mutate(winner=ifelse(winner== "Home", 1, 0)) %>% select(winner, elo1_pre, elo2_pre, elo_prob1, elo_prob2, qbelo1_pre, qbelo2_pre) %>% cor() %>% corrplot()
+```
+
+```{r}
+freq.na(elo)
+```
+
+We see from our NA frequency table
+
+```{r}
+qb_ratings <- elo[, c("qbelo1_pre", "qbelo2_pre") ]
+imputed_qb_ratings <- mice(qb_ratings, meth='pmm')
+qbRatingsImputed <- complete(imputed_qb_ratings, 1)
+# Add imputed columns to dataframe
+elo$qbelo1_pre <- qbRatingsImputed$qbelo1_pre
+elo$qbelo2_pre <- qbRatingsImputed$qbelo2_pre
+```
+
+### Training-Test Split
+Before we model our data using a decision tree, we'll need to create a training-test split for later validation. We'll hold out 20% of our dataset for testing.
 ```{r}
 #make this example reproducible
 set.seed(1234)
@@ -63,9 +91,9 @@ set.seed(1234)
 #create ID column
 elo$game_id <- 1:nrow(elo)
 
-#use 70% of dataset as training set and 30% as test set 
-train <- elo %>% dplyr::sample_frac(0.80)
-test  <- dplyr::anti_join(elo, train, by = 'game_id')
+#use 70% of dataset as traininging set and 30% as test set 
+training <- elo %>% dplyr::sample_frac(0.80)
+test  <- dplyr::anti_join(elo, training, by = 'game_id')
 ```
 
 
@@ -80,8 +108,9 @@ tree_spec <- decision_tree() %>%
  set_mode("classification")
 
 # Fit the decision tree to the data using all properties
+naive_model_formula <- winner ~ elo1_pre + elo2_pre + elo_prob1 + elo_prob2  + qbelo1_pre + qbelo2_pre + qb1_value_pre + qb2_value_pre + qb1_adj + qb2_adj + qbelo1_pre + qbelo2_pre
 tree_fit <- tree_spec %>%
- fit(winner ~ elo1_pre + elo2_pre + elo_prob1 + elo_prob2 + elo1_post + elo2_post + qbelo1_pre + qbelo2_pre + qb1_value_pre + qb2_value_pre + qb1_adj + qb2_adj + qbelo_prob1 + qbelo_prob2, data = train)
+ fit(naive_model_formula, data = training)
 
 summary(tree_fit)
 # predictions <-predict(tree_fit, test)
@@ -89,7 +118,8 @@ summary(tree_fit)
 
 Now we can use the naive decision tree model we built above and try to predict on our test set. We can also print out the confusion matrix of our predictions.
 ```{r}
-predictions <-predict(tree_fit, test)
+# Predict winners in test set
+predictions <- predict(tree_fit, test)
 
 test$prediction <- as.factor(predictions$.pred_class)
 
@@ -97,8 +127,28 @@ test$prediction <- as.factor(predictions$.pred_class)
 conf_mat(test, winner, prediction)
 ```
 
+```{r}
+tree <- caret::train(naive_model_formula, 
+                     data=training, 
+                     method="rpart", 
+                     trControl = trainControl(method = "cv", number=10), na.action  = na.pass)
+```
 
 
+```{r}
+confusionMatrix(tree)
+```
+
+```{r}
+simple_formula <- winner ~ elo1_pre + elo2_pre # + qbelo1_pre + qbelo2_pre + elo_prob1 + elo_prob2
+
+tree_simple <- caret::train(simple_formula, 
+                     data=training, 
+                     method="rpart", 
+                     trControl = trainControl(method = "cv", number=10))
+
+confusionMatrix(tree_simple)
+```
 
 ## Evalutaion
 
