@@ -17,6 +17,8 @@ library(tidymodels)
 ```
 
 
+**For this assignment, our classification task will be to try to predict whether the home team or away team will win a given NFL game, based on the respective ELO ratings prior to the game, along with other features included in the Kaggle dataset.**
+
 We'll be using the NFL ELO rating dataset we used in homework 1. [This dataset](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings) comes from Kaggle, and contains the [ELO ratings](https://en.wikipedia.org/wiki/Elo_rating_system) of NFL teams both before and after their matchups, as well as the points scored by each team in the game. 
 ```{r warning=FALSE, message=FALSE}
 elo <- read_csv("data/nfl_elo.csv")
@@ -25,7 +27,9 @@ elo <- read_csv("data/nfl_elo.csv")
 elo <- elo %>% 
   mutate(team1 = ifelse(team1=="WSH", "WAS", team1),
          team2 = ifelse(team2=="WSH", "WAS", team2),
-         team1wins = ifelse(score1 > score2, 1, 0))
+         winner = ifelse(score1 > score2, "Home", "Away"))
+
+elo$winner <- as.factor(elo$winner)
 ```
 
 ## Exploratory Data Analysis
@@ -48,7 +52,7 @@ ggplot(prelo, aes(elo, fill = team_type)) +
   labs(x="ELO Rating (pre-game)", title="Pre-Matchup ELO Ratings of NFL Teams (post-1967)")
 ```
 
-Both our distributions of pre-game ELO ratings for home and away teams look relatively normally distributed. This is helpful to know as **our classification task will be to try to predict whether the home team or away team will win a given NFL game, based on the respective ELO ratings prior to the game, along with other features included in the Kaggle dataset**
+Both our distributions of pre-game ELO ratings for home and away teams look relatively normally distributed. This is helpful to know before we go into modeling, as some modeling algorithms expect normally distributed (and sometimes scaled & centered) data.
 
 ### Train-Test Split
 Before we model our data using a decision tree, we'll need to create a train-test split for later validation. We'll hold out 20% of our dataset for testing.
@@ -69,13 +73,36 @@ test  <- dplyr::anti_join(elo, train, by = 'game_id')
 
 
 ## Building Models
+We can build a decision tree in R using the `tidymodels` library using the `decision_tree` function. 
+```{r}
+tree_spec <- decision_tree() %>%
+ set_engine("rpart") %>%
+ set_mode("classification")
+
+# Fit the decision tree to the data using all properties
+tree_fit <- tree_spec %>%
+ fit(winner ~ elo1_pre + elo2_pre + elo_prob1 + elo_prob2 + elo1_post + elo2_post + qbelo1_pre + qbelo2_pre + qb1_value_pre + qb2_value_pre + qb1_adj + qb2_adj + qbelo_prob1 + qbelo_prob2, data = train)
+
+summary(tree_fit)
+# predictions <-predict(tree_fit, test)
+```
+
+Now we can use the naive decision tree model we built above and try to predict on our test set. We can also print out the confusion matrix of our predictions.
+```{r}
+predictions <-predict(tree_fit, test)
+
+test$prediction <- as.factor(predictions$.pred_class)
+
+# Print out confusion matrix
+conf_mat(test, winner, prediction)
+```
 
 
 
 
 ## Evalutaion
 
-
+One advantage of decision trees from the [pre-work article](https://decizone.com/blog/the-good-the-bad-the-ugly-of-using-decision-trees) is the idea of explainability. That is, decision trees are an explainable model because they often mirror the if-else logic of human decision making, even if conditional probabilities are used. Conversely, random forest methods will tend to improve the performance of a model, as they combine the "wisdom" of several weak learners (decision trees). However, these random forest models often **lose out** on explainability, since they are an amalgamation of several models together, each with a different structure.
 
 
 
