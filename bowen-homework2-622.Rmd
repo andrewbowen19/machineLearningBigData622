@@ -10,15 +10,24 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r cars}
+```{r echo=FALSE, message=FALSE}
 library(tidyverse)
 library(caret)
 library(tidymodels)
 library(GGally)
 library(corrplot)
+library(questionr)
+library(mice)
 ```
 
+## Decision Trees
+[This article covers decision trees](https://decizone.com/blog/the-good-the-bad-the-ugly-of-using-decision-trees), as well as the advantages and disadvantages of using them. In this analysis, I train two decision trees on a [kaggle dataset](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings) containing the ELO ratings of NFL teams prior to their games. This information is leveraged to train models to predict the winner of a particular game (either the *Home* or *Away* team). In addition, I train a random forest classifier on a subset of features (simialr to one of the decision trees) to predict the same outcomes.
 
+One of the most salient points of the article is that the main advantage of using decision trees (especially in a business context) is the explainability and intuitiveness of the model. Decision trees are a pretty good approximation of how humans make and think about the relative inputs to their decisions. The game of twenty questions the article points to as an example of this kind of thinking is a helpful illustration. In addition, decision trees are models that can be conveyed to non-technical stakeholders more easily, as a simple flowchart diagram can be an effective visualization. This is actually one point for which decision trees beat out random forests. Even though the ensemble method of a random forest model 
+
+While decision trees can be simple, yet effective, they do have some drawbacks. The primary drawback is the tendency of decision trees to overfit to their training data. This comes from the tendency of decision trees to grow the number of leaf nodes with the number of features (This was discussed int he article under the *Complexity* disadvantage). This results in a tree that can predict training values well, because it grows to the shape of the trainig data, but not more generally. Trees that undergo this sort of training will not always generalize well, and pruning decision trees can be a worthwhiel endeavor. [*Data Science for Business (Provost & Fawcett*](https://www.googleadservices.com/pagead/aclk?sa=L&ai=DChcSEwigmdWSo5-FAxU3SkcBHeD_DMIYABAJGgJxdQ&ae=2&gclid=Cj0KCQjwk6SwBhDPARIsAJ59Gwca3DE0nSWlr6wwKr1RcVxpIzlSUBZUU5K7BsfOelh_5IAhcgjZYiQaAndBEALw_wcB&ohost=www.google.com&cid=CAESV-D2MSiy-uizbz8lPapdDNR8VU-zeGM-g6-8j3fKjgt7kuHAzIKPSY5WeUFIxnhm_K79QiuaQHZLX6R_CMHMVFGji3HTnY7AIYW9QwZPrRGAChT_QmntSA&sig=AOD64_2gd_AbY521uV5G-ORKa3iBZUYLBg&ctype=5&q=&ved=2ahUKEwjz-8uSo5-FAxUBMVkFHaJSC3AQww8oAnoECAMQCg&adurl=) is a good resource that discusses handling decision trees in a business modeling context well.
+
+## Data Analys
 **For this assignment, our classification task will be to try to predict whether the home team or away team will win a given NFL game, based on the respective ELO ratings prior to the game, along with other features included in the Kaggle dataset.**
 
 We'll be using the NFL ELO rating dataset we used in homework 1. [This dataset](https://www.kaggle.com/datasets/dtrade84/nfl-elo-ratings) comes from Kaggle, and contains the [ELO ratings](https://en.wikipedia.org/wiki/Elo_rating_system) of NFL teams both before and after their matchups, as well as the points scored by each team in the game. More information on the FiveThirtyEight method which calculates these ELO ratings can be [found here](https://fivethirtyeight.com/methodology/how-our-nfl-predictions-work/).
@@ -56,13 +65,16 @@ ggplot(prelo, aes(elo, fill = team_type)) +
 
 Both our distributions of pre-game ELO ratings for home and away teams look relatively normally distributed. This is helpful to know before we go into modeling, as some modeling algorithms expect normally distributed (and sometimes scaled & centered) data.
 
-Let's also take a look at the pair plot of our joint distribuions
+Let's also take a look at the pair plot of our joint distribuions between our features and output variable (`winner`)
 
 ```{r warning=FALSE, message=FALSE}
 
 elo %>% select(winner, elo1_pre, elo2_pre, elo_prob1, elo_prob2, qbelo1_pre, qbelo2_pre) %>%
   ggpairs()
 ```
+
+We'll also want to check for any collinearity between our feature variables, as well as with our output. This will help to protect us against redundancy of input features into our model, as well as helping to make sure our predictors explain the highest amount of variance in the response possible.
+
 ```{r}
 elo %>% mutate(winner=ifelse(winner== "Home", 1, 0)) %>% select(winner, elo1_pre, elo2_pre, elo_prob1, elo_prob2, qbelo1_pre, qbelo2_pre) %>% cor() %>% corrplot()
 ```
@@ -71,79 +83,76 @@ elo %>% mutate(winner=ifelse(winner== "Home", 1, 0)) %>% select(winner, elo1_pre
 freq.na(elo)
 ```
 
-We see from our NA frequency table
+We see from our NA frequency table that we have some fields of interest for which we'll want to impute missing values. We can fill in these missing values via the R `mice` package
 
-```{r}
-qb_ratings <- elo[, c("qbelo1_pre", "qbelo2_pre") ]
-imputed_qb_ratings <- mice(qb_ratings, meth='pmm')
-qbRatingsImputed <- complete(imputed_qb_ratings, 1)
-# Add imputed columns to dataframe
-elo$qbelo1_pre <- qbRatingsImputed$qbelo1_pre
-elo$qbelo2_pre <- qbRatingsImputed$qbelo2_pre
+```{r, impute, warning=FALSE, message=FALSE}
+# Impute all values in our training data
+input_cols <- c("elo1_pre", "elo2_pre",
+                "elo_prob1", "elo_prob2",
+                "qbelo1_pre", "qbelo2_pre",
+                "qb1_value_pre", "qb2_value_pre",
+                "qb1_adj", "qb2_adj")
+naive_inputs <- elo[, input_cols ]
+imputed_qb_ratings <- mice(naive_inputs, meth='pmm')
+imputedData <- complete(imputed_qb_ratings, 1)
+
+imputedData$winner <- elo$winner
 ```
 
 ### Training-Test Split
-Before we model our data using a decision tree, we'll need to create a training-test split for later validation. We'll hold out 20% of our dataset for testing.
+Before we model our data using a decision tree, we'll need to create a training-test split for later validation. We'll hold out 20% of our dataset for testing our models, and to try to avoid overfitting to our dataset. 
 ```{r}
-#make this example reproducible
 set.seed(1234)
 
-#create ID column
-elo$game_id <- 1:nrow(elo)
+# create ID column
+imputedData$game_id <- 1:nrow(imputedData)
 
-#use 70% of dataset as traininging set and 30% as test set 
-training <- elo %>% dplyr::sample_frac(0.80)
-test  <- dplyr::anti_join(elo, training, by = 'game_id')
+# use 70% of dataset as traininging set and 30% as test set
+training <- imputedData %>% dplyr::sample_frac(0.80)
+test  <- dplyr::anti_join(imputedData, training, by = 'game_id')
 ```
-
 
 
 
 
 ## Building Models
-We can build a decision tree in R using the `tidymodels` library using the `decision_tree` function. 
-```{r}
-tree_spec <- decision_tree() %>%
- set_engine("rpart") %>%
- set_mode("classification")
-
-# Fit the decision tree to the data using all properties
-naive_model_formula <- winner ~ elo1_pre + elo2_pre + elo_prob1 + elo_prob2  + qbelo1_pre + qbelo2_pre + qb1_value_pre + qb2_value_pre + qb1_adj + qb2_adj + qbelo1_pre + qbelo2_pre
-tree_fit <- tree_spec %>%
- fit(naive_model_formula, data = training)
-
-summary(tree_fit)
-# predictions <-predict(tree_fit, test)
-```
-
-Now we can use the naive decision tree model we built above and try to predict on our test set. We can also print out the confusion matrix of our predictions.
-```{r}
-# Predict winners in test set
-predictions <- predict(tree_fit, test)
-
-test$prediction <- as.factor(predictions$.pred_class)
-
-# Print out confusion matrix
-conf_mat(test, winner, prediction)
-```
+First we can build a decision tree model using all of our selected features above. We'll refer to this as our "naive" model, as it naively takes all possible features as inputs (regardless of how well correlated they may be)
 
 ```{r}
+naive_model_formula <- winner ~ elo1_pre + elo2_pre + elo_prob1 + elo_prob2 + qbelo1_pre + qbelo2_pre + qb1_value_pre + qb2_value_pre + qb1_adj + qb2_adj
+
 # Train decision
 tree <- caret::train(naive_model_formula, 
                      data=training, 
                      method="rpart", 
-                     trControl = trainControl(method = "cv", number=10), na.action  = na.pass)
+                     trControl = trainControl(method = "cv", number=5))
 ```
 
-
+Now we can change a few of the variables that are passed into our decision tree. Let's simplify the model (in terms of number of variables passed in) and train a decision tree with the same parameters
 ```{r}
-simple_formula <- winner ~ elo1_pre + elo2_pre +  qbelo1_pre + qbelo2_pre#  + elo_prob1 + elo_prob2
+simple_formula <- winner ~ elo1_pre + elo2_pre +  qbelo1_pre + qbelo2_pre
 
 tree_simple <- caret::train(simple_formula, 
                      data=training, 
                      method="rpart", 
-                     trControl = trainControl(method = "cv", number=10))
+                     trControl = trainControl(method = "cv", number=5))
 
+```
+
+### Random Forest
+
+Decision trees are very felxible, albeit weak, learners. They have a tendency to overfit, [especially as the number of leaf nodes grows](https://decizone.com/blog/the-good-the-bad-the-ugly-of-using-decision-trees). Random forests, which are comprised of several differently-trained decision trees combined together to form a prediction, can be leveraged to reduce the variance in your model. Luckily, the `caret` package in R supports training random forest models as well with a similar syntax. 
+
+
+Now we can train a random forest model on our data. We'll use the "simple" model formula, which only takes into account the team's and quarterbacks' ELO ratings prior to the matchup. This will construct a series of decision trees averaged together, which will hopefully make this model more robust against new data it hasn't been trained to see yet.
+```{r train-random-forest, warning=FALSE}
+set.seed(1234)
+
+# Train random forest model using 5-fold cross-validation
+rf_tree <- caret::train(simple_formula, 
+                        data=training, 
+                        method="rf", 
+                        trControl = trainControl(method = "cv", number=10))
 ```
 
 ## Evalutaion
@@ -152,12 +161,29 @@ One advantage of decision trees from the [pre-work article](https://decizone.com
 
 One simple way to evaluate our decision trees is via a confusion matrix, which shows the relative counts of true and false positives and negatives. In our case, an `Away` team winning would be considered a member of the "positive" class, while a `Home` team victory would be a negative class instance. it shoudl be noted there's nothing inherently "positive" or "negative" about these outcomes, they are simply an artifact of the classification task at hand.
 ```{r}
-confusionMatrisx(tree)
+predictions_naive <- predict(tree, test)
+
+confusionMatrix(test$winner, predictions_naive)
 ```
 
+And here's a confusion matrix for our simple model. On new data we see about the same accuracy, but for a much simpler model (only 4 inputs which are more explainable: team and QB pre-match ELO ratings) we see improved diagnostic metrics.
 
 ```{r simple-tree-conf-matrix}
-confusionMatrix(tree_simple)
+predictions_simple <- predict(tree_simple, test)
+
+confusionMatrix(test$winner, predictions_simple)
 ```
 
+In this case, the accuracies of our classification models are comparable (65% in the case of the naive model, and 64% in the case of the simplified model). Given this, we'd likely choose to use the simplified model, as it woul dbe more explainable and computationally simpler.
 
+We can print out the confusion matrix for our random forest model as well. While the accuracy of our classifier has dropped from the wider decision tree we trained above, a random forest approach will lessen the variance of our model, and likely reduce the chance of overfitting to training data
+
+```{r}
+# Print confusion matrix for RF model
+rf_predictions <- predict(rf_tree, test)
+
+confusionMatrix(test$winner, rf_predictions)
+```
+
+## Conclusion
+[This article](https://decizone.com/blog/the-good-the-bad-the-ugly-of-using-decision-trees) outlines the benefits and drawbacks to a decision tree approaach within a business context. Under the note of *Evolve*, the decision trees will need to be updated as more NFL games are played. In a production environment, checks on these decision tree (and random forest) models will need to be implemented to avoid [model drift](https://domino.ai/data-science-dictionary/model-drift#), in which the model trained begins to move *away* from the real world environment. Static decision trees that are not updated will eventually become out-of-date, especially if they don't update their trainning to reflect the real world
