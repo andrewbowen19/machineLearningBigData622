@@ -1,0 +1,128 @@
+---
+title: 'DATA 622: Homework 3'
+author: "Andrew Bowen"
+date: "2024-04-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+library(mice)
+library(ROCR)
+```
+
+
+
+
+### Articles
+The articles linked are using different means to the same end: predicting Covid-19 using machine learning algorithms. The [*Ahmad* paper](https://www.hindawi.com/journals/complexity/2021/5550344/) relies on decision trees to predict the presence of Covid-19, while the [Guhathakurata paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8137961/) relies on support vector machines (SVMs) to predict the presence of the disease. At its core, both papers undertake what is fundamentally a classification task (whether Covid is present in a patient or not)
+
+Below are some articles I found that discuss using Support Vector Mahcines and Decision Trees within the field of nuclear safety.
+
+- [Using SVMSs for Predictive Maintenance in Circulating Water Pumps in Nuclear Power Plants](https://www.osti.gov/biblio/1880271)
+- [SVMs for Predictive Maintenance](https://www.osti.gov/biblio/1891921)
+- [Decision Trees for Nuclear Use Scenarios](https://www.osti.gov/biblio/1477147)
+
+All three discuss the application of support vector machines within the context of nuclear safety; a field in which I have personal interest both having a physics background and policy interest. This set of articles differs from the Covid-19 articles as they all leverage SVMs/Decision trees for a machine learning task. However, two focus on predictive maintenance within nuclear power plants (using SVMs), while one uses decision trees for nuclear scenario planning.
+
+All in all, the fact that these methods are used in such varying contextx above speak to their robustness. SVMs and decision trees are no longer hot topics in terms of modeling, but in many cases simpler modeling approaches can still perform very well across disciplines. 
+
+
+### Data Analysis Using SVM
+
+Onto a lighter topic than Covid and Nuclear Safety: **sports gambling**. First, we'll read in the datasets used from homework 2. This is
+
+```{r}
+elo <- read.csv("data/nfl_elo.csv")
+
+# Some basic handling of team renames, as well as a boolean winner column
+elo <- elo %>% 
+  mutate(team1 = ifelse(team1=="WSH", "WAS", team1),
+         team2 = ifelse(team2=="WSH", "WAS", team2),
+         winner = ifelse(score1 > score2, "Home", "Away"))
+
+elo$winner <- as.factor(elo$winner)
+
+
+```
+
+We'll also read in our NBA player performance dataset. This can be used for a regression task later on (predicting how many points a player will score in a given game, for instance).
+```{r}
+nba <- read_csv("data/traditional.csv")
+head(nba)
+```
+
+
+Similar to homework 2, we'll be looking to classify games based on whether the hometeam (`team1` in our raw dataset) or the away team wins. For a regression task, we'll mirror our modeling from HW 1 and attempt to predict individual NBA player performances using our `nba` dataset
+
+We'll use the same imputationa nd train/test split methods we used in Homework 2
+```{r, impute, warning=FALSE, message=FALSE}
+# Impute all values in our training data
+input_cols <- c("elo1_pre", "elo2_pre",
+                "elo_prob1", "elo_prob2",
+                "qbelo1_pre", "qbelo2_pre",
+                "qb1_value_pre", "qb2_value_pre",
+                "qb1_adj", "qb2_adj")
+naive_inputs <- elo[, input_cols ]
+imputed_qb_ratings <- mice(naive_inputs, meth='pmm')
+imputedData <- complete(imputed_qb_ratings, 1)
+
+imputedData$winner <- elo$winner
+```
+
+
+```{r}
+# Create train-test split
+set.seed(1234)
+
+# create ID column
+imputedData$game_id <- 1:nrow(imputedData)
+
+# use 70% of dataset as traininging set and 30% as test set
+train <- imputedData %>% dplyr::sample_frac(0.70)
+test  <- dplyr::anti_join(imputedData, train, by = 'game_id')
+```
+
+
+
+Now we can fit a Support Vector Machine to classify our `winner` factor. We'll train our SVM model using the `caret` library
+```{r}
+trainControl <- trainControl(method="repeatedcv", number=10, repeats=3)
+svmLinear <- train(winner ~., data = train,
+              method = "svmLinear",
+              trControl = trainControl,
+              preProcess = c("center","scale"))
+```
+
+Now we can predict against our test dataset and get the confusion matrix for our classifier. In Homework 2, we receivved accuracy for our random forest model of $62%$ (our decision tree was about $64%$, but is prone to high variance based on the training data). In the context of sports prediction, higher accuracy values aren't always feasible due to the random nature of game outcomes. Within the sports gambling community, an accuracy (for binary predictions) in the 70% range is considered very good. This is an example of how modeling contexts can often determine the model performance benchmarks of interest
+```{r linear-svm-conf-matrix}
+predictionsLinear <- predict(svmLinear, test, decision.values = TRUE)
+
+# Print out confusion matrix for SVM Classifier with linear kernel
+confusionMatrix(test$winner, predictionsLinear)
+```
+
+
+Now let's try to train an SVM with a non-linear kernel function. First we'll try a polynomial kernel
+```{r train-poly-svm}
+svmPoly <- train(winner ~., data = train,
+              method = "svmPoly",
+              trControl = trainControl,
+              preProcess = c("center","scale"))
+```
+
+Now that we have a polynomial-kernel SVM trained, we can predict against the test set and print our confusion matrix and model diagnostic metrics.
+```{r poly-svm-conf-matrix}
+predictionsPoly <- predict(svmPoly, test, decision.values = TRUE)
+
+# Print out confusion matrix for SVM Classifier with linear kernel
+confusionMatrix(test$winner, predictionsPoly)
+```
+
+
