@@ -18,20 +18,20 @@ library(ROCR)
 ```
 
 
-
-
 ### Articles
-The articles linked are using different means to the same end: predicting Covid-19 using machine learning algorithms. The [*Ahmad* paper](https://www.hindawi.com/journals/complexity/2021/5550344/) relies on decision trees to predict the presence of Covid-19, while the [Guhathakurata paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8137961/) relies on support vector machines (SVMs) to predict the presence of the disease. At its core, both papers undertake what is fundamentally a classification task (whether Covid is present in a patient or not)
+The articles linked are using different means to the same end: predicting Covid-19 using machine learning algorithms. The [*Ahmad* paper](https://www.hindawi.com/journals/complexity/2021/5550344/) relies on decision trees to predict the presence of Covid-19, while the [*Guhathakurata* paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8137961/) relies on support vector machines (SVMs) to predict the presence of the disease. At its core, both papers undertake what is fundamentally a classification task (whether Covid is present in a patient or not). However, the models used in each approach are different. *Ahmad* uses a decision tree, while the *Guhathakurata* paper leverages a support vector machine (SVM) for this classification task.
 
-Below are some articles I found that discuss using Support Vector Mahcines and Decision Trees within the field of nuclear safety.
+Additionally, *Guhathakurata* remained with a linear kernel. It's possible their 87% accuracy figure could be improved upon by using a different SVM kernel function. However, this decision would come with the cost of compute complexity, and, in some cases, model explainability. In addition, accuracy won't be a great evaluation metric for this classification task since Covid data is very likely to be significantly imbalanced (most test cases will be negative, and a naive classifier could simply predict the baseline rate of positive cases). Both studies had similar results in temr of accuracy, recall, and F-1 scores, with *Guhathakurata* improving precision for their SVM clsasifier. 
 
-- [Using SVMSs for Predictive Maintenance in Circulating Water Pumps in Nuclear Power Plants](https://www.osti.gov/biblio/1880271)
-- [SVMs for Predictive Maintenance](https://www.osti.gov/biblio/1891921)
-- [Decision Trees for Nuclear Use Scenarios](https://www.osti.gov/biblio/1477147)
+Below are some articles I found that discuss using Support Vector Mahcines and Decision Trees within the field of nuclear safety, an area of interest for me professionally.
 
-All three discuss the application of support vector machines within the context of nuclear safety; a field in which I have personal interest both having a physics background and policy interest. This set of articles differs from the Covid-19 articles as they all leverage SVMs/Decision trees for a machine learning task. However, two focus on predictive maintenance within nuclear power plants (using SVMs), while one uses decision trees for nuclear scenario planning.
+- [**Stephens et al*, Using SVMSs for Predictive Maintenance in Circulating Water Pumps in Nuclear Power Plants](https://www.osti.gov/biblio/1880271)
+- [*Manjunatha*, SVMs for Predictive Maintenance](https://www.osti.gov/biblio/1891921)
+- [*Edmunds*, Decision Trees for Nuclear Use Scenarios](https://www.osti.gov/biblio/1477147)
 
-All in all, the fact that these methods are used in such varying contextx above speak to their robustness. SVMs and decision trees are no longer hot topics in terms of modeling, but in many cases simpler modeling approaches can still perform very well across disciplines. 
+All three discuss the application of support vector machines within the context of nuclear safety; a field in which I have personal interest both having a physics background and policy interest. This set of articles differs from the Covid-19 articles as they all leverage SVMs/Decision trees for a machine learning task. However, two focus on predictive maintenance within nuclear power plants (using SVMs), while one uses decision trees for nuclear scenario planning. Specifically, the *Manjunatha* article focuses on anomaly detection with motor pumps, attempting to predict which will need maintenance before they break down/degrade. Int his case, a multi-kernel approach is used.
+
+All in all, the fact that these methods are used in such varying context above speak to their robustness. SVMs and decision trees are no longer hot topics in terms of modeling, but in many cases simpler modeling approaches can still perform very well across disciplines. 
 
 
 ### Data Analysis Using SVM
@@ -61,7 +61,7 @@ head(nba)
 
 Similar to homework 2, we'll be looking to classify games based on whether the hometeam (`team1` in our raw dataset) or the away team wins. For a regression task, we'll mirror our modeling from HW 1 and attempt to predict individual NBA player performances using our `nba` dataset
 
-We'll use the same imputationa nd train/test split methods we used in Homework 2
+We'll use the same imputation and train/test split methods we used in Homework 2. In this case, we use predictive mean matching to imput our values
 ```{r, impute, warning=FALSE, message=FALSE}
 # Impute all values in our training data
 input_cols <- c("elo1_pre", "elo2_pre",
@@ -70,14 +70,14 @@ input_cols <- c("elo1_pre", "elo2_pre",
                 "qb1_value_pre", "qb2_value_pre",
                 "qb1_adj", "qb2_adj")
 naive_inputs <- elo[, input_cols ]
-imputed_qb_ratings <- mice(naive_inputs, meth='pmm')
+imputed_qb_ratings <- mice(naive_inputs, meth='pmm', printFlag = FALSE)
 imputedData <- complete(imputed_qb_ratings, 1)
 
 imputedData$winner <- elo$winner
 ```
 
 
-```{r}
+```{r train-test-split}
 # Create train-test split
 set.seed(1234)
 
@@ -92,11 +92,12 @@ test  <- dplyr::anti_join(imputedData, train, by = 'game_id')
 
 
 Now we can fit a Support Vector Machine to classify our `winner` factor. We'll train our SVM model using the `caret` library
-```{r}
+```{r train-svm-linear}
 trainControl <- trainControl(method="repeatedcv", number=10, repeats=3)
 svmLinear <- train(winner ~., data = train,
               method = "svmLinear",
               trControl = trainControl,
+              tuneLength=10,
               preProcess = c("center","scale"))
 ```
 
@@ -109,20 +110,31 @@ confusionMatrix(test$winner, predictionsLinear)
 ```
 
 
-Now let's try to train an SVM with a non-linear kernel function. First we'll try a polynomial kernel
-```{r train-poly-svm}
-svmPoly <- train(winner ~., data = train,
-              method = "svmPoly",
+Now let's try to train an SVM with a non-linear kernel function. First we'll try a [radial kernel](https://datascienceplus.com/radial-kernel-support-vector-classifier/)
+```{r train-radial-svm, message=FALSE}
+# train a radial SVM classifier with the same tuning params
+svmRadial <- train(winner ~., data = train,
+              method = "svmRadial",
               trControl = trainControl,
               preProcess = c("center","scale"))
 ```
 
-Now that we have a polynomial-kernel SVM trained, we can predict against the test set and print our confusion matrix and model diagnostic metrics.
-```{r poly-svm-conf-matrix}
-predictionsPoly <- predict(svmPoly, test, decision.values = TRUE)
-
-# Print out confusion matrix for SVM Classifier with linear kernel
-confusionMatrix(test$winner, predictionsPoly)
+We can use the `plot` function on our Radial SVM to see the classifier's accuracy as a function of cost
+```{r plot-radial-svm-tuning}
+# Plot Linear SVM tuning
+plot(svmRadial)
 ```
 
 
+Now that we have a radial-kernel SVM trained, we can predict against the test set and print our confusion matrix and model diagnostic metrics fo rthis classifier.
+```{r radial-svm-conf-matrix}
+predictionsRadial <- predict(svmRadial, test, decision.values = TRUE)
+
+# Print out confusion matrix for SVM Classifier with linear kernel
+confusionMatrix(test$winner, predictionsRadial)
+```
+
+We see decent performance in our radial-kernel SVM ($65%$ accuracy overall, comparable with other methods tried). In this case, since we actually don't see a marked improvement using a radial kernel, we'd likely stay with the linear SVM in order to keep with a simpler model. 
+
+
+While the [SVM can be used for regression tasks](https://www.mathworks.com/help/stats/understanding-support-vector-machine-regression.html), it is primarily used for classification, as the decision boundary created can separate distinct classes of data points within the feature space. In this case, I'd likely go with the SVM (using the linear kernel) in a business context. It produces similar results, but is simpler. This advantage in explainability is also partly why I'd prefer the SVM to the random forest approach, which is akin to a black box in terms of how the model is generated. While the SVM isn't as intuitive as a linear regression, for instance, dimensionality reduction (such as PCA) could be leveraged first to reduce the data to two principal components, which are then plotted along with the decision boundary. This would at least allow for a more helpful visualization of our SVM classifier and its requisite decision boundary.
