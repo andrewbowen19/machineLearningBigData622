@@ -1,0 +1,28 @@
+---
+title: "DATA 622 Homework 4"
+author: "Andrew Bowen"
+date: "2024-04-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include=FALSE}
+library(tidyverse)
+library(caret)
+```
+
+The dataset I'll be using comes from the [Radiation Exposure Monitoring System (REMS) query tool](https://www.google.com/search?client=safari&rls=en&q=REMS+Qury+Tool&ie=UTF-8&oe=UTF-8) provided by the Department of Energy. It provides
+```{r}
+# df <- read_csv("")
+```
+
+
+## TODO
+- Add basic cleaner script for excel file (convert to CSV locally)
+- Ignore data files in .gitignore
+- Add basic EDA
+- Add model selection (Regression Tasks)
+- 
